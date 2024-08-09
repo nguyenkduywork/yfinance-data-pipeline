@@ -1,34 +1,40 @@
-# META Stock Data Fetcher
+[Setting up JDK, Hadoop WinUtils, Spark binaries and environment variables on Windows/x64 System](https://app.tango.us/app/workflow/Setting-up-JDK--Hadoop-WinUtils--Spark-binaries-and-environment-variables-on-Windows-x64-System-ce23bd438117424c87009b2ac1fc82bd)
 
-This Python script fetches META stock data at one-minute intervals using the yfinance library and saves it to a CSV file.
+[Download Terraform on Windows](https://app.tango.us/app/workflow/Downloading-Terraform-on-Windows--A-Quick-Tutorial-63634416f09348c4857f64e3804235a2)
 
-## Requirements
+[Download and Configure Apache Kafka on Windows/x64 System](https://app.tango.us/app/workflow/Download-and-Configure-Apache-Kafka-on-Windows-x64-System-474eb2506acd494ebd5c94686ea610c2)
 
-- Python 3.9+
-- yfinance
-- pandas
+Install Kafka:
 
-## Installation
+Download Kafka from the official website
+Extract it to a directory, e.g., C:\kafka
 
-1. Clone this repository
-2. Install dependencies:
 
-```
-pip install yfinance pandas
-```
+Start Zookeeper and Kafka:
 
-## Usage
+Open a command prompt and navigate to the Kafka directory
+Start Zookeeper: %KAFKA_HOME%\bin\windows\zookeeper-server-start.bat %KAFKA_HOME%\config\zookeeper.properties
+Open another command prompt and start Kafka: .%KAFKA_HOME%\bin\windows\kafka-server-start.bat %KAFKA_HOME%\config\server.properties
 
-Run the script:
 
-```
-python meta_stock_data_fetcher.py
-```
+Create a Kafka topic:
 
-The script will continuously fetch META stock data every minute and save it to a CSV file named `META_stock_data_YYYYMMDD_HHMMSS.csv` in the same directory.
+Open another command prompt and run: %KAFKA_HOME%\bin\windows\kafka-topics.bat --create --topic stock_data --bootstrap-server localhost:9092
 
-Press Ctrl+C to stop the script.
 
-## Customization
 
-Modify the `main()` function to change the ticker symbol, interval, or duration as needed.
+Install required Python libraries:
+
+Run: pip install kafka-python pyspark yfinance pandas pytz
+
+
+Run the producer:
+
+Save the producer code to a file (e.g., stock_producer.py)
+Run: python stock_producer.py
+
+
+Run the consumer:
+
+Save the consumer code to a file (e.g., stock_consumer.py)
+Run: spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.1.2 stock_consumer.py

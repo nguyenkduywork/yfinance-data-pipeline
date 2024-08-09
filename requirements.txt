@@ -1,1 +1,6 @@
 yfinance
+pandas 
+pyspark
+kafka-python
+pytz
+six
