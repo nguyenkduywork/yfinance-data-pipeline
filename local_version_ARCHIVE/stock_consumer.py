@@ -4,21 +4,33 @@ from pyspark.sql.types import StructType, StructField, StringType, DoubleType, T
 import os
 import logging
 
+last_row = None
+
 def setup_logging():
     """Set up logging configuration."""
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Suppress specific Kafka warnings
     logging.getLogger("org.apache.spark").setLevel(logging.ERROR)
-
+    
 def process_batch(df, epoch_id):
-    """Process each batch of data using Spark SQL."""
+    """
+    Process each batch of data using Spark SQL.
+
+    Args:
+        df (DataFrame): The dataframe containing the batch data.
+        epoch_id (int): The epoch ID of the batch.
+    """
+    global last_row
     logging.info(f"Processing batch {epoch_id}")
     
     if df.rdd.isEmpty():
         logging.error(f"Batch {epoch_id} is empty. No data to process.")
         return
     
+    # Create a temporary view for Spark SQL
     df.createOrReplaceTempView("stock_data")
     
+    # Deduplicate data based on the timestamp using Spark SQL
     deduplicated_df = df.sparkSession.sql("""
         SELECT DISTINCT * 
         FROM stock_data 
@@ -29,21 +41,41 @@ def process_batch(df, epoch_id):
         logging.error(f"Batch {epoch_id} contains only duplicate data. Nothing to append.")
         return
     
-    output_path = "s3://demo-bucket/stock_data_output.csv"
+    output_path = "stock_data_output.csv"
+    file_exists = os.path.isfile(output_path)
     
     try:
-        deduplicated_df.write.mode("append").csv(output_path)
-        logging.info(f"Batch {epoch_id} appended to {output_path}")
+        pandas_df = deduplicated_df.toPandas()
+        if not pandas_df.empty:
+            new_last_row = pandas_df.iloc[-1].to_dict()
+            if last_row == new_last_row:
+                logging.error(f"Batch {epoch_id} contains the same data as the last row. Not appending.")
+            else:
+                pandas_df.to_csv(
+                    output_path, 
+                    mode='a', 
+                    header=not file_exists, 
+                    index=False
+                )
+                last_row = new_last_row
+                logging.info(f"Batch {epoch_id} appended to {output_path}")
     except Exception as e:
         logging.error(f"Error appending batch {epoch_id} to {output_path}: {e}")
 
 def main():
-    """Main function to set up Spark session and start streaming data processing."""
+    """
+    Main function to set up Spark session and start streaming data processing.
+    """
     setup_logging()
     
-    spark = SparkSession.builder \
-        .appName("EMRServerlessStockDataStreaming") \
-        .getOrCreate()
+    try:
+        spark = SparkSession.builder \
+            .appName("StockDataStreaming") \
+            .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.1.2") \
+            .getOrCreate()
+    except Exception as e:
+        logging.error(f"Error creating Spark session: {e}")
+        return
 
     schema = StructType([
         StructField("Open", DoubleType()),
@@ -55,12 +87,16 @@ def main():
         StructField("Datetime", TimestampType())
     ])
 
-    df = spark.readStream \
-        .format("kafka") \
-        .option("kafka.bootstrap.servers", os.environ['BOOTSTRAP_SERVERS']) \
-        .option("subscribe", "stock_data") \
-        .option("startingOffsets", "earliest") \
-        .load()
+    try:
+        df = spark.readStream \
+            .format("kafka") \
+            .option("kafka.bootstrap.servers", "localhost:9092") \
+            .option("subscribe", "stock_data") \
+            .option("startingOffsets", "earliest") \
+            .load()
+    except Exception as e:
+        logging.error(f"Error reading from Kafka: {e}")
+        return
 
     parsed_df = df.select(from_json(col("value").cast("string"), schema).alias("data")).select("data.*")
     parsed_df = parsed_df.withColumn("Datetime", to_timestamp("Datetime"))
@@ -80,7 +116,12 @@ def main():
         .trigger(processingTime='10 seconds') \
         .start()
 
-    query.awaitTermination()
+    try:
+        query.awaitTermination()
+    except KeyboardInterrupt:
+        logging.error("User stopped the program")
+    except Exception as e:
+        logging.error(f"Error during stream processing: {e}")
 
 if __name__ == "__main__":
     main()
